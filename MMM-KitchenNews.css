@@ -1,0 +1,114 @@
+/* MMM-KitchenNews - MMM-KitchenNews.css
+ * One-line ticker. The logo is inline right in front of each title, and the
+ * whole row scrolls left. Sizes come from CSS variables set on .kn-wrap.
+ */
+
+.kn-wrap {
+	width: 100%;
+}
+
+.kn-empty {
+	padding: 6px 0;
+}
+
+.kn-bar {
+	position: relative;
+	width: 100%;
+	height: var(--kn-height, 56px);
+	overflow: hidden;
+}
+
+/* Progress bar: transparent full-width track; only the block is visible. */
+.kn-progress {
+	position: relative;
+	width: 100%;
+	overflow: hidden;
+}
+
+.kn-progress-block {
+	position: absolute;
+	left: 0;
+	top: 0;
+	height: 100%;
+	will-change: transform;
+}
+
+/* Full-width scrolling area; text is clipped at the left/right edges. */
+.kn-viewport {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+}
+
+.kn-track {
+	position: absolute;
+	left: 0;
+	top: 0;
+	height: 100%;
+	white-space: nowrap;
+	will-change: transform;
+}
+
+.kn-article {
+	display: inline-block;
+	height: var(--kn-height, 56px);
+	line-height: var(--kn-height, 56px);
+}
+
+/* Logo sits inline, same height as the title text. */
+.kn-logo {
+	display: inline-flex;
+	align-items: center;
+	margin-right: 8px;
+	vertical-align: middle;
+}
+
+.kn-logo-img {
+	height: var(--kn-title-size, 28px);
+	width: auto;
+	max-width: var(--kn-logo-w, 100px);
+	object-fit: contain;
+	vertical-align: middle;
+}
+
+.kn-logo-txt {
+	white-space: nowrap;
+	font-weight: 700;
+	font-size: var(--kn-title-size, 28px);
+}
+
+.kn-count,
+.kn-title,
+.kn-age,
+.kn-sep,
+.kn-summary {
+	vertical-align: middle;
+}
+
+/* "4/12" position indicator, between the logo and the title. */
+.kn-count {
+	margin-right: 10px;
+	font-size: var(--kn-summary-size, 24px);
+	opacity: 0.55;
+}
+
+.kn-title {
+	font-size: var(--kn-title-size, 28px);
+	font-weight: 700;
+}
+
+.kn-sep {
+	font-size: var(--kn-title-size, 28px);
+	font-weight: 700;
+}
+
+.kn-age {
+	font-size: var(--kn-summary-size, 24px);
+	opacity: 0.65;
+}
+
+.kn-summary {
+	font-size: var(--kn-summary-size, 24px);
+	font-weight: 300;
+	opacity: 0.9;
+}

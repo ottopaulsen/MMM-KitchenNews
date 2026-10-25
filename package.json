@@ -1,0 +1,20 @@
+{
+  "name": "mmm-kitchennews",
+  "version": "1.0.0",
+  "description": "Simple single-line news ticker for MagicMirror² — RSS/Atom feeds, per-source limits, category filtering and a scroll-bar-style progress indicator.",
+  "main": "MMM-KitchenNews.js",
+  "keywords": [
+    "MagicMirror",
+    "MMM",
+    "news",
+    "rss",
+    "atom",
+    "ticker"
+  ],
+  "author": "Otto Paulsen <ottpau@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ottopaulsen/MMM-KitchenNews.git"
+  }
+}
