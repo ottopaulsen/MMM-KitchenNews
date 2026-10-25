@@ -294,7 +294,7 @@ Module.register("MMM-KitchenNews", {
 		this.dom = { wrap, bar, vp, track, segs, progress, progressBlock };
 
 		// Start the scroll engine once the DOM is attached and measurable.
-		if (this._raf) cancelAnimationFrame(this._raf);
+		this.stopEngine();
 		requestAnimationFrame(() => this.initEngine());
 
 		return wrap;
@@ -328,45 +328,74 @@ Module.register("MMM-KitchenNews", {
 			d.progressBlock.style.width = `${blockW}px`;
 		}
 
-		// Start with the first article just off the right edge so it scrolls in.
-		this.state = { scrollX: -vpW, i: 0 };
-		this._last = performance.now();
-		d.track.style.transform = `translateX(${vpW}px)`;
-		this.updateProgress();
-
-		if (this._raf) cancelAnimationFrame(this._raf);
-		this._raf = requestAnimationFrame((t) => this.tick(t));
-	},
-
-	tick (ts) {
-		const d = this.dom;
-		const st = this.state;
-		if (!d || !st || !d.segs.length) return;
-
-		const dt = Math.min(0.1, (ts - this._last) / 1000); // clamp so a stalled tab doesn't leap
-		this._last = ts;
+		this.stopEngine();
+		this.state = { i: 0 };
 
 		const vel = this.velocityPps();
-		if (vel > 0) st.scrollX += vel * dt;
-
-		const n = d.segs.length;
-		if (st.scrollX >= d.endX) {
-			// Whole list has passed - loop back and re-enter from the right.
-			st.scrollX = -d.vpW;
-			st.i = 0;
+		if (vel <= 0) {
+			// Frozen: just show the first article at the left edge.
+			d.track.style.transform = "translate3d(0, 0, 0)";
 			this.updateProgress();
-		} else {
-			// Track which article leads at the left edge; it drives the progress bar.
-			let changed = false;
-			while (st.i + 1 < n && st.scrollX >= d.segs[st.i + 1].offset) {
-				st.i += 1;
-				changed = true;
-			}
-			if (changed) this.updateProgress();
+			return;
 		}
 
-		d.track.style.transform = `translateX(${-st.scrollX}px)`;
-		this._raf = requestAnimationFrame((t) => this.tick(t));
+		// Drive the scroll with the Web Animations API so it runs on the browser's
+		// compositor thread. Unlike a per-frame requestAnimationFrame loop, that
+		// stays smooth even when the main thread is busy with other modules - which
+		// is what made it stutter on the Raspberry Pi. The track travels from just
+		// off the right edge (+vpW) to fully past the left edge (-endX); the
+		// infinite iteration then snaps it back to the right to re-enter.
+		const travel = vpW + d.endX;
+		d.durationMs = (travel / vel) * 1000;
+		d.track.style.transform = `translate3d(${vpW}px, 0, 0)`;
+		this._anim = d.track.animate(
+			[
+				{ transform: `translate3d(${vpW}px, 0, 0)` },
+				{ transform: `translate3d(${-d.endX}px, 0, 0)` }
+			],
+			{ duration: d.durationMs, iterations: Infinity, easing: "linear" }
+		);
+
+		// The progress block only steps between articles, so a light rAF that reads
+		// the animation clock and moves it on a change is enough; its own smoothness
+		// doesn't matter. Skip it entirely when there is no bar.
+		this.updateProgress();
+		if (d.progress && d.progressBlock) {
+			this._raf = requestAnimationFrame(() => this.trackProgress());
+		}
+	},
+
+	// Follow the compositor animation's clock and step the progress block to the
+	// article currently leading at the left edge.
+	trackProgress () {
+		const d = this.dom;
+		const st = this.state;
+		if (!d || !st || !this._anim || !d.segs.length) { this._raf = null; return; }
+
+		const timing = this._anim.effect.getComputedTiming();
+		const p = timing.progress; // 0..1 within the current iteration (null if not running)
+		if (p !== null && p !== undefined) {
+			const scrollX = -d.vpW + p * (d.vpW + d.endX);
+			let i = 0;
+			while (i + 1 < d.segs.length && scrollX >= d.segs[i + 1].offset) i += 1;
+			if (i !== st.i) {
+				st.i = i;
+				this.updateProgress();
+			}
+		}
+		this._raf = requestAnimationFrame(() => this.trackProgress());
+	},
+
+	// Cancel both the compositor animation and the progress tracker.
+	stopEngine () {
+		if (this._raf) {
+			cancelAnimationFrame(this._raf);
+			this._raf = null;
+		}
+		if (this._anim) {
+			try { this._anim.cancel(); } catch (error) { /* already gone */ }
+			this._anim = null;
+		}
 	},
 
 	// speed is pixels per second - constant regardless of bar width.
@@ -379,7 +408,7 @@ Module.register("MMM-KitchenNews", {
 		const d = this.dom;
 		if (!d || !d.progressBlock || !this.state) return;
 		const left = (this.state.i || 0) * (d.progStep || 0);
-		d.progressBlock.style.transform = `translateX(${left}px)`;
+		d.progressBlock.style.transform = `translate3d(${left}px, 0, 0)`;
 	},
 
 	ageString (ts) {
@@ -401,12 +430,19 @@ Module.register("MMM-KitchenNews", {
 			cancelAnimationFrame(this._raf);
 			this._raf = null;
 		}
+		if (this._anim) {
+			try { this._anim.pause(); } catch (error) { /* ignore */ }
+		}
 	},
 
 	resume () {
-		if (!this._raf && this.dom && this.dom.segs && this.dom.segs.length) {
-			this._last = performance.now();
-			this._raf = requestAnimationFrame((t) => this.tick(t));
+		if (this._anim) {
+			try { this._anim.play(); } catch (error) { /* ignore */ }
+			if (!this._raf && this.dom && this.dom.progress && this.dom.progressBlock) {
+				this._raf = requestAnimationFrame(() => this.trackProgress());
+			}
+		} else if (this.dom && this.dom.segs && this.dom.segs.length) {
+			this.initEngine();
 		}
 	}
 });
