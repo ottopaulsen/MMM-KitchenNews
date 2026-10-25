@@ -142,7 +142,9 @@
 	display: flex;
 	align-items: var(--kn-align-logo, center); /* logo vs text: top / bottom / center */
 	width: 100%;
-	height: auto;
+	/* Reserve room for `lines` lines even when an article is shorter, so the layout
+	 * doesn't jump between a one-line and a multi-line article. */
+	min-height: calc(var(--kn-lines, 2) * var(--kn-line-h, 1.3em));
 	line-height: normal;
 	white-space: normal;       /* allow the text to wrap */
 	will-change: opacity;
@@ -169,7 +171,7 @@
 	-webkit-line-clamp: var(--kn-lines, 2);
 	line-clamp: var(--kn-lines, 2);
 	overflow: hidden;
-	line-height: 1.25;
+	line-height: var(--kn-line-h, 1.3em);
 	white-space: normal;
 	text-align: var(--kn-justify-text, left);
 }

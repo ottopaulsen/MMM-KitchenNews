@@ -192,6 +192,13 @@ Module.register("MMM-KitchenNews", {
 		const alignLogoMap = { top: "flex-start", bottom: "flex-end", center: "center" };
 		wrap.style.setProperty("--kn-align-logo", alignLogoMap[this.config.alignLogo] || "center");
 		wrap.style.setProperty("--kn-justify-text", ["left", "right", "center"].includes(this.config.justifyText) ? this.config.justifyText : "left");
+		// A fixed line height lets mode 2 reserve exactly `lines` lines of height, so a
+		// short (one-line) article keeps the same footprint as a full one and the rest
+		// of the screen doesn't jump. Derived from the larger of the two font sizes.
+		const toPx = (v) => (typeof v === "number" ? v : (isNaN(Number(v)) ? null : Number(v)));
+		const tsPx = toPx(this.config.titleSize);
+		const ssPx = toPx(this.config.summarySize);
+		wrap.style.setProperty("--kn-line-h", (tsPx !== null && ssPx !== null) ? `${Math.round(Math.max(tsPx, ssPx) * 1.3)}px` : "1.3em");
 		wrap.style.marginTop = this.cssSize(this.config.marginTop);
 		wrap.style.marginRight = this.cssSize(this.config.marginRight);
 		wrap.style.marginBottom = this.cssSize(this.config.marginBottom);
