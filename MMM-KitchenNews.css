@@ -83,6 +83,7 @@
 	font-size: var(--kn-title-size, 28px);
 }
 
+.kn-text,
 .kn-count,
 .kn-title,
 .kn-age,
@@ -117,4 +118,58 @@
 	font-size: var(--kn-summary-size, 24px);
 	font-weight: 300;
 	opacity: 0.9;
+}
+
+/* ---------------------------------------------------------------------------
+ * Mode 2: one fixed article at a time, left-aligned, fading in and out.
+ * The logo height comes from `height`; the number of `lines` and the font
+ * sizes decide the total height. The logo is centred vertically.
+ * ------------------------------------------------------------------------- */
+.kn-mode2 .kn-bar {
+	height: auto;
+	overflow: visible;
+}
+
+.kn-stage {
+	position: relative;
+	width: 100%;
+}
+
+.kn-mode2 .kn-article {
+	position: relative;
+	left: auto;
+	top: auto;
+	display: flex;
+	align-items: var(--kn-align-logo, center); /* logo vs text: top / bottom / center */
+	width: 100%;
+	height: auto;
+	line-height: normal;
+	white-space: normal;       /* allow the text to wrap */
+	will-change: opacity;
+}
+
+.kn-mode2 .kn-logo {
+	flex: 0 0 auto;
+	margin-right: 14px;
+}
+
+.kn-mode2 .kn-logo-img {
+	height: var(--kn-logo-h, 56px);
+}
+
+.kn-mode2 .kn-logo-txt {
+	font-size: var(--kn-title-size, 28px);
+}
+
+.kn-mode2 .kn-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: var(--kn-lines, 2);
+	line-clamp: var(--kn-lines, 2);
+	overflow: hidden;
+	line-height: 1.25;
+	white-space: normal;
+	text-align: var(--kn-justify-text, left);
 }

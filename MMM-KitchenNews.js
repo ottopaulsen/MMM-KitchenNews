@@ -28,7 +28,16 @@ Module.register("MMM-KitchenNews", {
 		categories: [],        // if non-empty: only show articles tagged with one of these
 		excludeCategories: [], // if non-empty: hide articles tagged with any of these (wins over categories)
 
-		// Motion
+		// Display mode: 1 = continuous ticker (scrolls), 2 = one fixed article at a
+		// time, left-aligned, fading in and out. mode is a global (module) option.
+		mode: 1,
+		lines: 2,              // mode 2: number of text lines to show per article
+		showTimeSeconds: 8,    // mode 2: seconds the article stays fully visible before fading
+		fadeTimeSeconds: 1,    // mode 2: fade in/out duration in seconds (decimals allowed)
+		justifyText: "left",   // mode 2: horizontal text alignment - "left", "right" or "center"
+		alignLogo: "center",   // mode 2: vertical logo alignment vs the text - "top", "bottom" or "center"
+
+		// Motion (mode 1)
 		speed: 175,            // scroll speed in pixels per second (constant - identical at any bar width; 0 = frozen)
 		clearBeforeNext: false,// false: next trails the previous with a gap; true: wait until previous is gone
 		gapBetweenArticles: 80,// px of empty space between articles (clearBeforeNext=false)
@@ -169,12 +178,20 @@ Module.register("MMM-KitchenNews", {
 	},
 
 	getDom () {
+		this.stopEngine(); // stop the previous render's engine before replacing the DOM
+
+		const mode = Number(this.config.mode) === 2 ? 2 : 1;
 		const wrap = document.createElement("div");
-		wrap.className = "kn-wrap";
+		wrap.className = mode === 2 ? "kn-wrap kn-mode2" : "kn-wrap";
 		wrap.style.setProperty("--kn-height", this.cssSize(this.config.height));
+		wrap.style.setProperty("--kn-logo-h", this.cssSize(this.config.height));
 		wrap.style.setProperty("--kn-logo-w", this.cssSize(this.config.maxLogoWidth));
 		wrap.style.setProperty("--kn-title-size", this.cssSize(this.config.titleSize));
 		wrap.style.setProperty("--kn-summary-size", this.cssSize(this.config.summarySize));
+		wrap.style.setProperty("--kn-lines", String(Math.max(1, Number(this.config.lines) || 1)));
+		const alignLogoMap = { top: "flex-start", bottom: "flex-end", center: "center" };
+		wrap.style.setProperty("--kn-align-logo", alignLogoMap[this.config.alignLogo] || "center");
+		wrap.style.setProperty("--kn-justify-text", ["left", "right", "center"].includes(this.config.justifyText) ? this.config.justifyText : "left");
 		wrap.style.marginTop = this.cssSize(this.config.marginTop);
 		wrap.style.marginRight = this.cssSize(this.config.marginRight);
 		wrap.style.marginBottom = this.cssSize(this.config.marginBottom);
@@ -193,81 +210,36 @@ Module.register("MMM-KitchenNews", {
 
 		const bar = document.createElement("div");
 		bar.className = "kn-bar";
-		const vp = document.createElement("div");
-		vp.className = "kn-viewport";
-		const track = document.createElement("div");
-		track.className = "kn-track";
-
-		const segs = [];
 		const total = list.length;
-		list.forEach((a, idx) => {
-			const art = document.createElement("span");
-			art.className = "kn-article";
-			art.style.transform = "translate3d(10000px, 0, 0)"; // park off-screen until initEngine places it
 
-			// Logo, inline right in front of the title.
-			const logo = document.createElement("span");
-			logo.className = "kn-logo";
-			const img = document.createElement("img");
-			img.className = "kn-logo-img";
-			const txt = document.createElement("span");
-			txt.className = "kn-logo-txt";
-			txt.textContent = a.source.name;
-			txt.style.display = "none";
-			img.addEventListener("error", () => {
-				img.style.display = "none";
-				txt.style.display = "inline";
+		this.dom = { wrap, bar, mode };
+
+		if (mode === 2) {
+			// One article at a time; the mode-2 driver swaps and fades the content.
+			const stage = document.createElement("div");
+			stage.className = "kn-stage";
+			bar.appendChild(stage);
+			this.dom.stage = stage;
+		} else {
+			const vp = document.createElement("div");
+			vp.className = "kn-viewport";
+			const track = document.createElement("div");
+			track.className = "kn-track";
+			const segs = [];
+			list.forEach((a, idx) => {
+				const art = this.buildArticle(a, idx, total, 1);
+				track.appendChild(art);
+				segs.push({ el: art, article: a });
 			});
-			if (a.source.logo) {
-				img.src = a.source.logo;
-				img.alt = a.source.name;
-			} else {
-				img.style.display = "none";
-				txt.style.display = "inline";
-			}
-			logo.appendChild(img);
-			logo.appendChild(txt);
-			art.appendChild(logo);
+			vp.appendChild(track);
+			bar.appendChild(vp);
+			this.dom.vp = vp;
+			this.dom.track = track;
+			this.dom.segs = segs;
+		}
 
-			// Position indicator, e.g. "4/12", between the logo and the title.
-			const count = document.createElement("span");
-			count.className = "kn-count";
-			count.textContent = `${idx + 1}/${total}`;
-			art.appendChild(count);
-
-			const title = document.createElement("span");
-			title.className = "kn-title";
-			title.textContent = a.title;
-			art.appendChild(title);
-
-			if (this.config.showAge) {
-				const age = document.createElement("span");
-				age.className = "kn-age";
-				age.textContent = ` (${this.ageString(a.ts)})`;
-				art.appendChild(age);
-			}
-
-			if (a.summary) {
-				const sep = document.createElement("span");
-				sep.className = "kn-sep";
-				sep.textContent = ": ";
-				art.appendChild(sep);
-
-				const sum = document.createElement("span");
-				sum.className = "kn-summary";
-				sum.textContent = a.summary;
-				art.appendChild(sum);
-			}
-
-			track.appendChild(art);
-			segs.push({ el: art, article: a });
-		});
-
-		vp.appendChild(track);
-		bar.appendChild(vp);
-
-		// Progress bar: a transparent full-width track with a visible block that steps
-		// across it as the shown article changes (like a scroll bar).
+		// Progress bar (both modes): a transparent track with a visible block that
+		// steps across it as the shown article changes (like a scroll bar).
 		let progress = null;
 		let progressBlock = null;
 		if (this.config.showProgressBar) {
@@ -292,18 +264,147 @@ Module.register("MMM-KitchenNews", {
 			wrap.appendChild(progress);
 		}
 
-		this.dom = { wrap, bar, vp, track, segs, progress, progressBlock };
+		this.dom.progress = progress;
+		this.dom.progressBlock = progressBlock;
 
-		// Start the scroll engine once the DOM is attached and measurable.
-		this.stopEngine();
-		requestAnimationFrame(() => this.initEngine());
+		// Start the engine once the DOM is attached and measurable.
+		requestAnimationFrame(() => this.startEngine());
 
 		return wrap;
 	},
 
+	// Build one article element. mode 1 lays it out inline on a single line; mode 2
+	// puts the logo beside a text block that wraps to `lines` lines.
+	buildArticle (a, idx, total, mode) {
+		const art = document.createElement("span");
+		art.className = "kn-article";
+		if (mode === 1) art.style.transform = "translate3d(10000px, 0, 0)"; // parked until placed
+
+		// Logo.
+		const logo = document.createElement("span");
+		logo.className = "kn-logo";
+		const img = document.createElement("img");
+		img.className = "kn-logo-img";
+		const txt = document.createElement("span");
+		txt.className = "kn-logo-txt";
+		txt.textContent = a.source.name;
+		txt.style.display = "none";
+		img.addEventListener("error", () => {
+			img.style.display = "none";
+			txt.style.display = "inline";
+		});
+		if (a.source.logo) {
+			img.src = a.source.logo;
+			img.alt = a.source.name;
+		} else {
+			img.style.display = "none";
+			txt.style.display = "inline";
+		}
+		logo.appendChild(img);
+		logo.appendChild(txt);
+		art.appendChild(logo);
+
+		// Text: counter, title, age, summary (one line in mode 1, wrapped in mode 2).
+		const text = document.createElement("span");
+		text.className = "kn-text";
+
+		const count = document.createElement("span");
+		count.className = "kn-count";
+		count.textContent = `${idx + 1}/${total}`;
+		text.appendChild(count);
+
+		const title = document.createElement("span");
+		title.className = "kn-title";
+		title.textContent = a.title;
+		text.appendChild(title);
+
+		if (this.config.showAge) {
+			const age = document.createElement("span");
+			age.className = "kn-age";
+			age.textContent = ` (${this.ageString(a.ts)})`;
+			text.appendChild(age);
+		}
+
+		if (a.summary) {
+			const sep = document.createElement("span");
+			sep.className = "kn-sep";
+			sep.textContent = ": ";
+			text.appendChild(sep);
+
+			const sum = document.createElement("span");
+			sum.className = "kn-summary";
+			sum.textContent = a.summary;
+			text.appendChild(sum);
+		}
+
+		art.appendChild(text);
+		return art;
+	},
+
+	// Pick the driver for the current mode.
+	startEngine () {
+		if (this.dom && this.dom.mode === 2) this.startMode2();
+		else this.initEngine();
+	},
+
+	// Mode 2: show one article at a time, fixed to the left, fading in and out.
+	startMode2 () {
+		const d = this.dom;
+		const list = this.currentList || [];
+		if (!d || !d.stage || !list.length) return;
+		this.stopMode2();
+		this.state = { i: 0 };
+
+		// Progress geometry: the block steps once per article.
+		if (d.progress && d.progressBlock) {
+			const totalW = d.progress.clientWidth || d.bar.clientWidth || 0;
+			d.progStep = totalW / list.length;
+			const blockW = (Number(this.config.progressBarWidth) > 0) ? Number(this.config.progressBarWidth) : d.progStep;
+			d.progressBlock.style.width = `${blockW}px`;
+		}
+
+		this.m2Show(0);
+	},
+
+	// Render article `idx`, fade it in, hold, fade it out, then advance.
+	m2Show (idx) {
+		const d = this.dom;
+		const list = this.currentList || [];
+		if (!d || !d.stage || !list.length) return;
+		const n = list.length;
+		idx = ((idx % n) + n) % n;
+		this.state = this.state || {};
+		this.state.i = idx;
+
+		const fadeMs = Math.max(0, Number(this.config.fadeTimeSeconds) || 0) * 1000;
+		const showMs = Math.max(0, Number(this.config.showTimeSeconds) || 0) * 1000;
+
+		const art = this.buildArticle(list[idx], idx, n, 2);
+		art.style.opacity = "0";
+		art.style.transition = `opacity ${fadeMs}ms linear`;
+		d.stage.replaceChildren(art);
+		this.updateProgress();
+
+		// Fade in on the next frame (so the 0 opacity is applied first).
+		this._m2raf = requestAnimationFrame(() => { art.style.opacity = "1"; });
+
+		// Hold, then fade out, then advance.
+		this._m2t1 = setTimeout(() => {
+			art.style.opacity = "0";
+			this._m2t2 = setTimeout(() => this.m2Show(idx + 1), fadeMs);
+		}, fadeMs + showMs);
+	},
+
+	// Stop the mode-2 cycle and clear its timers.
+	stopMode2 () {
+		if (this._m2raf) { cancelAnimationFrame(this._m2raf); this._m2raf = null; }
+		if (this._m2t1) { clearTimeout(this._m2t1); this._m2t1 = null; }
+		if (this._m2t2) { clearTimeout(this._m2t2); this._m2t2 = null; }
+	},
+
 	initEngine () {
 		const d = this.dom;
-		if (!d || !d.segs.length) return;
+		if (!d || !d.segs || !d.segs.length) return;
 
 		const vpW = d.vp.clientWidth || d.bar.clientWidth || 0;
 		const gapPx = this.config.clearBeforeNext
@@ -400,12 +501,13 @@ Module.register("MMM-KitchenNews", {
 		this._raf = requestAnimationFrame(() => this.trackProgress());
 	},
 
-	// Cancel every per-article animation and the progress tracker.
+	// Cancel every per-article animation, the mode-2 cycle, and the progress tracker.
 	stopEngine () {
 		if (this._raf) {
 			cancelAnimationFrame(this._raf);
 			this._raf = null;
 		}
+		this.stopMode2();
 		const d = this.dom;
 		if (d && d.anims) {
 			for (const a of d.anims) {
@@ -448,6 +550,7 @@ Module.register("MMM-KitchenNews", {
 			cancelAnimationFrame(this._raf);
 			this._raf = null;
 		}
+		this.stopMode2();
 		const d = this.dom;
 		if (d && d.anims) {
 			for (const a of d.anims) {
@@ -458,14 +561,21 @@ Module.register("MMM-KitchenNews", {
 
 	resume () {
 		const d = this.dom;
-		if (d && d.anims && d.anims.length) {
+		if (!d) return;
+		if (d.mode === 2) {
+			if (d.stage && this.currentList && this.currentList.length) {
+				this.m2Show((this.state && this.state.i) || 0);
+			}
+			return;
+		}
+		if (d.anims && d.anims.length) {
 			for (const a of d.anims) {
 				try { a.play(); } catch (error) { /* ignore */ }
 			}
 			if (!this._raf && d.progress && d.progressBlock) {
 				this._raf = requestAnimationFrame(() => this.trackProgress());
 			}
-		} else if (d && d.segs && d.segs.length) {
+		} else if (d.segs && d.segs.length) {
 			this.initEngine();
 		}
 	}

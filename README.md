@@ -2,22 +2,36 @@
 
 News reader for the kitchen monitor that also works in other places.
 
-Shows articles on a single line:
-
 ```
 LOGO 4/12 Here is the title (3 hours): Here is the summary of the article …
 ```
 
-The logo sits inline right in front of each title, followed by a position
-indicator (`4/12` = the 4th of 12 articles), then the title, age and summary.
-The first article scrolls in from the right, and the whole row scrolls
-continuously to the left; when an article has fully passed, the next one
-follows. Articles are mixed across sources and ordered newest first.
+Each article shows a source logo, a position indicator (`4/12` = the 4th of 12
+articles), then the title, age and summary. Articles are mixed across sources
+and ordered newest first. There are two **display modes** (see below): a
+continuous one-line ticker, or one fixed article at a time that fades in and out.
 
 Feeds are RSS or Atom. They are fetched and parsed server-side (in
 `node_helper.js`) using the same stack the stock `newsfeed` module uses
 (`feedme` + `iconv-lite` + `html-to-text`), so there is **nothing to
 `npm install`** on a normal MagicMirror install.
+
+## Display modes
+
+Set with the global `mode` option.
+
+- **Mode 1 — continuous ticker (default).** Everything on one line. The first
+  article scrolls in from the right, the row scrolls continuously to the left,
+  and when an article has fully passed the next one follows. Smooth on a GPU; on
+  a software-rendered device (e.g. a Raspberry Pi 3 with no GPU acceleration) the
+  continuous scroll can stutter — use mode 2 there.
+- **Mode 2 — one article at a time.** A single article is shown fixed to the
+  left, wrapped to `lines` lines. It fades in over `fadeTimeSeconds`, stays for
+  `showTimeSeconds`, fades out, and the next one appears. Because nothing moves
+  between fades, it stays smooth even without a GPU. In this mode `height` sets
+  the **logo** height, and the total height is decided by `lines` and the font
+  sizes; the logo is aligned vertically with `alignLogo` and the text with
+  `justifyText`.
 
 ## Installation
 
@@ -40,7 +54,8 @@ in `config` only the ones you want to override:
             { name: "NRK",     url: "https://www.nrk.no/toppsaker.rss",  maxCount: 5 },
             { name: "VG",      url: "https://www.vg.no/rss/feed/",       maxCount: 5 }
         ]
-        // e.g. add  speed: 20,  gapBetweenArticles: 120,  clearBeforeNext: true
+        // Mode 1 (ticker):  speed: 20,  gapBetweenArticles: 120,  clearBeforeNext: true
+        // Mode 2 (fades):    mode: 2,  lines: 2,  showTimeSeconds: 8,  fadeTimeSeconds: 1
     }
 }
 ```
@@ -69,10 +84,16 @@ in `config` only the ones you want to override:
 | `skipIfNoSummary`    | `false`   | If `true`, only show articles that have a summary. Overridable per source. |
 | `categories`         | `[]`      | If non-empty, only show articles tagged with one of these feed categories. Matching is **exact**. Empty = no filtering. Overridable per source. |
 | `excludeCategories`  | `[]`      | If non-empty, hide articles tagged with any of these categories (exact match). Wins over `categories`. Overridable per source. |
-| `speed`              | `175`     | Scroll speed in **pixels per second** — constant, so instances in a narrow and a wide position move at the same visual speed. `0` = frozen (first article only). |
-| `clearBeforeNext`    | `false`   | `false`: the next article trails the previous one with `gapBetweenArticles` of space. `true`: the next article isn't shown until the previous has fully scrolled off to the left. |
-| `gapBetweenArticles` | `80`      | Pixels of empty space between consecutive articles (when `clearBeforeNext` is `false`). |
-| `height`             | `56`      | Max height of the bar, in pixels. |
+| `mode`               | `1`       | Display mode: `1` = continuous ticker, `2` = one fixed article at a time (fades). See [Display modes](#display-modes). |
+| `speed`              | `175`     | **(Mode 1)** Scroll speed in **pixels per second** — constant, so instances in a narrow and a wide position move at the same visual speed. `0` = frozen (first article only). |
+| `clearBeforeNext`    | `false`   | **(Mode 1)** `false`: the next article trails the previous one with `gapBetweenArticles` of space. `true`: the next article isn't shown until the previous has fully scrolled off to the left. |
+| `gapBetweenArticles` | `80`      | **(Mode 1)** Pixels of empty space between consecutive articles (when `clearBeforeNext` is `false`). |
+| `lines`              | `2`       | **(Mode 2)** Number of text lines to show per article (extra text is clipped with an ellipsis). |
+| `showTimeSeconds`    | `8`       | **(Mode 2)** Seconds the article stays fully visible before it starts fading. Decimals allowed. |
+| `fadeTimeSeconds`    | `1`       | **(Mode 2)** Fade in / fade out duration, in seconds. Decimals allowed. |
+| `justifyText`        | `"left"`  | **(Mode 2)** Horizontal text alignment: `"left"`, `"right"` or `"center"`. |
+| `alignLogo`          | `"center"`| **(Mode 2)** Vertical logo position relative to the text: `"top"`, `"bottom"` or `"center"`. |
+| `height`             | `56`      | **Mode 1:** max height of the bar, in pixels. **Mode 2:** the logo height — total height then follows `lines` and the font sizes. |
 | `width`              | `0`       | Explicit bar width in pixels (`0` = fill the region). Full-width `bar` regions (`top_bar`, `bottom_bar`) fill on their own; **centered regions such as `top_center` have no width of their own, so set this** — otherwise the ticker collapses to zero width and nothing shows. |
 | `titleSize`          | `40`      | Font size of the title. A number is treated as pixels; a string (e.g. `"1.4rem"`) is used as-is. The logo is rendered at this height. |
 | `summarySize`        | `36`      | Font size of the age and summary. Same number/string rule. |
@@ -94,6 +115,8 @@ in `config` only the ones you want to override:
 
 ## How the motion works
 
+**Mode 1 (ticker):**
+
 - The first article scrolls in from the right edge; the row then scrolls left
   continuously at `speed` pixels per second (`0` freezes it). Because the speed
   is a constant in pixels, the same `speed` looks identical whether the bar is
@@ -102,15 +125,26 @@ in `config` only the ones you want to override:
 - With `clearBeforeNext: false` the next article trails the previous one with a
   `gapBetweenArticles` gap (ticker style). With `true`, the next one only
   appears once the previous has fully scrolled off.
-- Each article shows, in order: its logo, a `4/12` position indicator (the Nth
-  of the total shown), then the title, age and summary. The logo scrolls along
-  inline at the same height as the title text.
-- The progress bar (if shown) spans the whole module width. The track is
-  transparent; a visible block steps across it — like a scroll bar — to mark
-  which article of N is currently at the front. With N articles the width is
-  split into N steps and the block is 1/N wide, unless `progressBarWidth` sets a
-  fixed width. The bar's height sits on top of `height` (with `progressBarMargin`
-  between them); the outer margin stays outside everything.
+- The logo scrolls along inline at the same height as the title text.
+- Each article is animated as its own layer, so even a long list stays within a
+  GPU's texture limits where hardware acceleration is available.
+
+**Mode 2 (one at a time):**
+
+- One article is shown, fixed to the left and wrapped to `lines` lines. It fades
+  in over `fadeTimeSeconds`, holds for `showTimeSeconds`, fades out, then the next
+  article appears — looping through the list. Nothing moves between fades, so it
+  stays smooth without a GPU.
+- `height` sizes the logo; `alignLogo` places it vertically against the text, and
+  `justifyText` aligns the text horizontally.
+
+**Both modes** show, per article: the logo, a `4/12` position indicator (the Nth
+of the total shown), then the title, age and summary. The progress bar (if shown)
+spans the whole module width — a transparent track with a visible block that steps
+across it, like a scroll bar, marking which article of N is showing. With N
+articles the block is 1/N wide, unless `progressBarWidth` sets a fixed width. The
+bar's height sits on top of `height` (with `progressBarMargin` between them); the
+outer margin stays outside everything.
 
 ### Filtering by category
 
