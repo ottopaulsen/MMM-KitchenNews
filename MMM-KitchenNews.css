@@ -45,14 +45,20 @@
 	left: 0;
 	top: 0;
 	height: 100%;
-	white-space: nowrap;
-	will-change: transform;
 }
 
+/* Each article is its own absolutely-positioned, GPU-composited layer that slides
+ * across on its own transform animation (see initEngine). Keeping each article a
+ * separate small layer - instead of one giant row - is what lets the Raspberry
+ * Pi composite the scroll on the GPU and keep it smooth. */
 .kn-article {
-	display: inline-block;
+	position: absolute;
+	left: 0;
+	top: 0;
+	white-space: nowrap;
 	height: var(--kn-height, 56px);
 	line-height: var(--kn-height, 56px);
+	will-change: transform;
 }
 
 /* Logo sits inline, same height as the title text. */

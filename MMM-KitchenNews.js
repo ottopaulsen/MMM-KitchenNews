@@ -203,6 +203,7 @@ Module.register("MMM-KitchenNews", {
 		list.forEach((a, idx) => {
 			const art = document.createElement("span");
 			art.className = "kn-article";
+			art.style.transform = "translate3d(10000px, 0, 0)"; // park off-screen until initEngine places it
 
 			// Logo, inline right in front of the title.
 			const logo = document.createElement("span");
@@ -309,16 +310,18 @@ Module.register("MMM-KitchenNews", {
 			? Math.max(this.config.gapBetweenArticles, vpW)
 			: this.config.gapBetweenArticles;
 
-		for (const s of d.segs) s.el.style.marginRight = `${gapPx}px`;
-		// Measure after the margins are applied.
+		// Lay the articles end-to-end on a virtual track and record where each one
+		// starts. They are positioned individually (not in one wide row), so each
+		// stays its own small compositor layer.
+		let offset = 0;
 		for (const s of d.segs) {
-			s.offset = s.el.offsetLeft;
 			s.width = s.el.offsetWidth;
+			s.offset = offset;
+			offset += s.width + gapPx;
 		}
 		d.vpW = vpW;
 		d.gapPx = gapPx;
-		const last = d.segs[d.segs.length - 1];
-		d.endX = last.offset + last.width + gapPx;
+		d.total = offset;        // full virtual track length, including the trailing gap
 
 		// Progress bar geometry: the module width split into one step per article.
 		if (d.progress && d.progressBlock) {
@@ -330,31 +333,42 @@ Module.register("MMM-KitchenNews", {
 
 		this.stopEngine();
 		this.state = { i: 0 };
+		d.anims = [];
 
 		const vel = this.velocityPps();
 		if (vel <= 0) {
-			// Frozen: just show the first article at the left edge.
-			d.track.style.transform = "translate3d(0, 0, 0)";
+			// Frozen: first article at the left edge, the rest parked off to the right.
+			for (const s of d.segs) {
+				s.el.style.transform = `translate3d(${s.offset === 0 ? 0 : vpW + s.offset}px, 0, 0)`;
+			}
 			this.updateProgress();
 			return;
 		}
 
-		// Drive the scroll with the Web Animations API so it runs on the browser's
-		// compositor thread. Unlike a per-frame requestAnimationFrame loop, that
-		// stays smooth even when the main thread is busy with other modules - which
-		// is what made it stutter on the Raspberry Pi. The track travels from just
-		// off the right edge (+vpW) to fully past the left edge (-endX); the
-		// infinite iteration then snaps it back to the right to re-enter.
-		const travel = vpW + d.endX;
-		d.durationMs = (travel / vel) * 1000;
-		d.track.style.transform = `translate3d(${vpW}px, 0, 0)`;
-		this._anim = d.track.animate(
-			[
-				{ transform: `translate3d(${vpW}px, 0, 0)` },
-				{ transform: `translate3d(${-d.endX}px, 0, 0)` }
-			],
-			{ duration: d.durationMs, iterations: Infinity, easing: "linear" }
-		);
+		// Animate each article as its OWN small layer sliding across the viewport,
+		// rather than one giant multi-thousand-pixel row. A full row exceeds the
+		// Raspberry Pi's max texture size, so it can't be composited and falls back
+		// to CPU rasterization - the cause of the once-a-second stutter. One article
+		// per layer keeps each within GPU limits, so the motion runs on the
+		// compositor thread and stays smooth. Each article starts just off the right
+		// edge (later ones further right), travels the whole track length left over
+		// one period, then the infinite iteration snaps it back - seamless because
+		// the layout repeats every `d.total` pixels.
+		d.durationMs = (d.total / vel) * 1000;
+		for (const s of d.segs) {
+			const startX = vpW + s.offset;
+			const endX = startX - d.total;
+			s.el.style.transform = `translate3d(${startX}px, 0, 0)`;
+			s.anim = s.el.animate(
+				[
+					{ transform: `translate3d(${startX}px, 0, 0)` },
+					{ transform: `translate3d(${endX}px, 0, 0)` }
+				],
+				{ duration: d.durationMs, iterations: Infinity, easing: "linear" }
+			);
+			d.anims.push(s.anim);
+		}
+		d.refAnim = d.segs[0].anim;
 
 		// The progress block only steps between articles, so a light rAF that reads
 		// the animation clock and moves it on a change is enough; its own smoothness
@@ -370,12 +384,12 @@ Module.register("MMM-KitchenNews", {
 	trackProgress () {
 		const d = this.dom;
 		const st = this.state;
-		if (!d || !st || !this._anim || !d.segs.length) { this._raf = null; return; }
+		if (!d || !st || !d.refAnim || !d.segs.length) { this._raf = null; return; }
 
-		const timing = this._anim.effect.getComputedTiming();
+		const timing = d.refAnim.effect.getComputedTiming();
 		const p = timing.progress; // 0..1 within the current iteration (null if not running)
 		if (p !== null && p !== undefined) {
-			const scrollX = -d.vpW + p * (d.vpW + d.endX);
+			const scrollX = p * d.total - d.vpW;
 			let i = 0;
 			while (i + 1 < d.segs.length && scrollX >= d.segs[i + 1].offset) i += 1;
 			if (i !== st.i) {
@@ -386,15 +400,19 @@ Module.register("MMM-KitchenNews", {
 		this._raf = requestAnimationFrame(() => this.trackProgress());
 	},
 
-	// Cancel both the compositor animation and the progress tracker.
+	// Cancel every per-article animation and the progress tracker.
 	stopEngine () {
 		if (this._raf) {
 			cancelAnimationFrame(this._raf);
 			this._raf = null;
 		}
-		if (this._anim) {
-			try { this._anim.cancel(); } catch (error) { /* already gone */ }
-			this._anim = null;
+		const d = this.dom;
+		if (d && d.anims) {
+			for (const a of d.anims) {
+				try { a.cancel(); } catch (error) { /* already gone */ }
+			}
+			d.anims = [];
+			d.refAnim = null;
 		}
 	},
 
@@ -430,18 +448,24 @@ Module.register("MMM-KitchenNews", {
 			cancelAnimationFrame(this._raf);
 			this._raf = null;
 		}
-		if (this._anim) {
-			try { this._anim.pause(); } catch (error) { /* ignore */ }
+		const d = this.dom;
+		if (d && d.anims) {
+			for (const a of d.anims) {
+				try { a.pause(); } catch (error) { /* ignore */ }
+			}
 		}
 	},
 
 	resume () {
-		if (this._anim) {
-			try { this._anim.play(); } catch (error) { /* ignore */ }
-			if (!this._raf && this.dom && this.dom.progress && this.dom.progressBlock) {
+		const d = this.dom;
+		if (d && d.anims && d.anims.length) {
+			for (const a of d.anims) {
+				try { a.play(); } catch (error) { /* ignore */ }
+			}
+			if (!this._raf && d.progress && d.progressBlock) {
 				this._raf = requestAnimationFrame(() => this.trackProgress());
 			}
-		} else if (this.dom && this.dom.segs && this.dom.segs.length) {
+		} else if (d && d.segs && d.segs.length) {
 			this.initEngine();
 		}
 	}
